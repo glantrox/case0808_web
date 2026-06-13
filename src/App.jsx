@@ -1,6 +1,8 @@
-import React, { useState, forwardRef, useRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef } from 'react';
 import { pdfjs, Document, Page } from 'react-pdf';
 import HTMLFlipBook from 'react-pageflip';
+import { motion, AnimatePresence } from 'framer-motion';
+import './App.css';
 
 // Use the local worker bundled with pdfjs-dist
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -10,17 +12,12 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 
 // ---------- Page components (all forward refs for react-pageflip) ----------
 
-// Renders a full portrait PDF page, scaled to fit the flipbook dimensions perfectly
 const PortraitPage = forwardRef(({ pageNumber, width, height, origWidth, origHeight }, ref) => {
-  // Determine whether to constrain by width or height to maintain aspect ratio
   const containerRatio = width / height;
   const pageRatio = origWidth / origHeight;
   const constrainByWidth = pageRatio > containerRatio;
-
-  // Calculate exact scaled dimensions to avoid relying on browser transforms
   const scaledWidth = constrainByWidth ? width : height * pageRatio;
   const scaledHeight = constrainByWidth ? width / pageRatio : height;
-
   const leftOffset = (width - scaledWidth) / 2;
   const topOffset = (height - scaledHeight) / 2;
 
@@ -32,17 +29,11 @@ const PortraitPage = forwardRef(({ pageNumber, width, height, origWidth, origHei
           height: '100%',
           overflow: 'hidden',
           position: 'relative',
-          background: '#fff',
+          background: 'transparent',
           clipPath: 'inset(0)',
         }}
       >
-        <div
-          style={{
-            position: 'absolute',
-            top: topOffset,
-            left: leftOffset,
-          }}
-        >
+        <div style={{ position: 'absolute', top: topOffset, left: leftOffset }}>
           <Page
             pageNumber={pageNumber}
             width={constrainByWidth ? width : undefined}
@@ -57,9 +48,6 @@ const PortraitPage = forwardRef(({ pageNumber, width, height, origWidth, origHei
 });
 PortraitPage.displayName = 'PortraitPage';
 
-// Renders one half (left or right) of a landscape spread.
-// The full spread is rendered at 2× the flipbook page width,
-// then CSS clips it to show only the requested half.
 const SpreadHalfPage = forwardRef(({ pageNumber, width, half }, ref) => (
   <div ref={ref}>
     <div
@@ -68,17 +56,11 @@ const SpreadHalfPage = forwardRef(({ pageNumber, width, half }, ref) => (
         height: '100%',
         overflow: 'hidden',
         position: 'relative',
-        background: '#fff',
+        background: 'transparent',
         clipPath: 'inset(0)',
       }}
     >
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: half === 'right' ? -width : 0,
-        }}
-      >
+      <div style={{ position: 'absolute', top: 0, left: half === 'right' ? -width : 0 }}>
         <Page
           pageNumber={pageNumber}
           width={width * 2}
@@ -91,17 +73,67 @@ const SpreadHalfPage = forwardRef(({ pageNumber, width, half }, ref) => (
 ));
 SpreadHalfPage.displayName = 'SpreadHalfPage';
 
-// ---------- Main flipbook component ----------
+// ---------- Subcomponents ----------
 
-export default function Flipbook() {
+const FlippableIdCard = ({ isExpanded, cardWidth, cardHeight }) => {
+  return (
+    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <Document file={'/assets/porto.pdf'} loading={<div>Loading ID...</div>}>
+         <HTMLFlipBook 
+            width={cardWidth} 
+            height={cardHeight} 
+            showCover={false} 
+            usePortrait={true}
+            maxShadowOpacity={0.5}
+         >
+            <SpreadHalfPage pageNumber={2} width={cardWidth} half="left" />
+            <SpreadHalfPage pageNumber={2} width={cardWidth} half="right" />
+         </HTMLFlipBook>
+      </Document>
+    </div>
+  );
+};
+
+// ---------- Main App component ----------
+
+export default function App() {
   const flipBookRef = useRef(null);
   const [currentPage, setCurrentPage] = useState(0);
-
-  // virtualPages: array of { pdfPage, type: 'portrait' | 'spread-left' | 'spread-right', origWidth?, origHeight? }
   const [virtualPages, setVirtualPages] = useState(null);
-  // flipbook dimensions derived from the PDF content
   const [bookSize, setBookSize] = useState(null);
   const [error, setError] = useState(null);
+
+  const [isIdCardExpanded, setIsIdCardExpanded] = useState(false);
+  const [isNotebookExtracted, setIsNotebookExtracted] = useState(false);
+  const [dummyKey, setDummyKey] = useState(0);
+  const [hasBeenGrabbed, setHasBeenGrabbed] = useState(false);
+  const [windowSize, setWindowSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+
+  useEffect(() => {
+    const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Responsive dimensions for expanded ID Card
+  let expH = Math.min(840, windowSize.h * 0.9);
+  let expW = expH / 1.4;
+  if (expW > windowSize.w * 0.9) {
+    expW = windowSize.w * 0.9;
+    expH = expW * 1.4;
+  }
+
+  // Responsive dimensions for unexpanded ID Card
+  const folderMaxH = Math.min(700, windowSize.h * 0.9);
+  const folderMaxW = Math.min(1000, windowSize.w * 0.9);
+  const panelWidth = folderMaxW / 2;
+  
+  let unexpH = Math.min(616, folderMaxH * 0.8); // 80% of folder height max
+  let unexpW = unexpH / 1.4;
+  if (unexpW > panelWidth * 0.85) {
+    unexpW = panelWidth * 0.85;
+    unexpH = unexpW * 1.4;
+  }
 
   const pdfUrl = '/assets/porto.pdf';
 
@@ -118,7 +150,6 @@ export default function Flipbook() {
         const isLandscape = vp.width > vp.height;
 
         if (isLandscape) {
-          // Remember the first spread's dimensions to derive the flipbook size
           if (!spreadDims) {
             spreadDims = { width: vp.width, height: vp.height };
           }
@@ -129,13 +160,26 @@ export default function Flipbook() {
         }
       }
 
-      // Derive page size: target width is fixed, height comes from spread aspect ratio
-      const targetWidth = 400;
-      let targetHeight = 550; // fallback if no spreads found
+      const paddingX = 100;
+      const paddingY = 150; // Reserve space for the slider
+
+      let targetWidth = Math.min((window.innerWidth - paddingX) / 2, 650);
+      let targetHeight = 550;
 
       if (spreadDims) {
         const halfW = spreadDims.width / 2;
         targetHeight = Math.round(targetWidth * (spreadDims.height / halfW));
+        
+        // If it's too tall for the screen, scale it down proportionally
+        if (targetHeight > window.innerHeight - paddingY) {
+          targetHeight = window.innerHeight - paddingY;
+          targetWidth = Math.round(targetHeight * (halfW / spreadDims.height));
+        }
+      } else {
+        if (targetHeight > window.innerHeight - paddingY) {
+          targetHeight = window.innerHeight - paddingY;
+          targetWidth = Math.round(targetHeight / 1.414);
+        }
       }
 
       setBookSize({ width: targetWidth, height: targetHeight });
@@ -145,139 +189,260 @@ export default function Flipbook() {
     }
   };
 
-  if (error) {
-    return (
-      <div style={{ padding: 40, textAlign: 'center', color: 'red' }}>
-        Error loading PDF: {error.message}
-      </div>
-    );
-  }
+  const isCurrentPageSpread = virtualPages && virtualPages[currentPage] && virtualPages[currentPage].type.startsWith('spread');
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: '100vh',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#f7f7f7', // Minimalist light grey background
-        padding: '40px 20px',
-        boxSizing: 'border-box',
-        gap: '30px',
-      }}
-    >
-      <Document
-        file={pdfUrl}
-        onLoadSuccess={handleLoadSuccess}
-        onLoadError={setError}
-        loading={<div style={{ padding: 40, fontSize: 18, color: '#333' }}>Loading Interactive PDF…</div>}
-      >
-        {virtualPages && bookSize && (
-          <div
-            style={{
-              transform: `translateX(${
-                currentPage === 0
-                  ? -(bookSize.width / 2)
-                  : currentPage === virtualPages.length - 1
-                  ? (bookSize.width / 2)
-                  : 0
-              }px)`,
-              transition: 'transform 0.6s cubic-bezier(0.645, 0.045, 0.355, 1)',
-              filter: 'drop-shadow(0 25px 30px rgba(0, 0, 0, 0.15))',
+    <div className="folder-wrapper">
+      <div className="folder-drop-shadow-wrapper">
+        <div className="folder-container">
+          <div className="folder-background"></div>
+          
+          {/* The Right Tab */}
+          <div className="folder-tab">
+            <span>CASE-0808</span>
+          </div>
+
+          {/* --- Left Panel --- */}
+          <div className="panel-left">
+          <div className="clip"></div>
+          
+          <motion.div
+            className="id-card-wrapper"
+            layoutId="id-card"
+            style={{ 
+              width: unexpW, 
+              height: unexpH,
+              left: '50%',
+              x: '-50%' // horizontally center within panel-left
             }}
           >
-            <HTMLFlipBook
-              width={bookSize.width}
-              height={bookSize.height}
-              showCover={true}
-              usePortrait={false}
-              ref={flipBookRef}
-              onFlip={(e) => setCurrentPage(e.data)}
-            >
-              {virtualPages.map((vp, i) =>
-                vp.type === 'portrait' ? (
-                  <PortraitPage
-                    key={`p-${i}`}
-                    pageNumber={vp.pdfPage}
-                    width={bookSize.width}
-                    height={bookSize.height}
-                    origWidth={vp.origWidth}
-                    origHeight={vp.origHeight}
-                  />
-                ) : (
-                  <SpreadHalfPage
-                    key={`p-${i}`}
-                    pageNumber={vp.pdfPage}
-                    width={bookSize.width}
-                    half={vp.type === 'spread-left' ? 'left' : 'right'}
-                  />
-                )
-              )}
-            </HTMLFlipBook>
-          </div>
-        )}
-      </Document>
+            <FlippableIdCard isExpanded={false} cardWidth={unexpW} cardHeight={unexpH} />
+          </motion.div>
+        </div>
 
-      {/* Interactive Page Slider */}
-      {virtualPages && bookSize && (
-        <div
-          style={{
-            width: '100%',
-            maxWidth: '450px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '16px 24px',
-            background: 'rgba(255, 255, 255, 0.9)',
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
-            borderRadius: '24px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,1)',
-            boxSizing: 'border-box',
-            transition: 'transform 0.3s ease, box-shadow 0.3s ease',
-            border: '1px solid rgba(0,0,0,0.05)'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 12px 32px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,1)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,1)';
-          }}
-        >
-          <div style={{ fontSize: '13px', fontWeight: '700', color: '#555', letterSpacing: '1.5px', textTransform: 'uppercase' }}>
-            Page {currentPage + 1} of {virtualPages.length}
-          </div>
-          <div style={{ display: 'flex', width: '100%', alignItems: 'center', gap: '20px' }}>
-            <span style={{ fontSize: '14px', fontWeight: '800', color: '#000' }}>1</span>
-            <input
-              type="range"
-              min={0}
-              max={virtualPages.length - 1}
-              value={currentPage}
-              onChange={(e) => {
-                const pageIdx = parseInt(e.target.value, 10);
-                setCurrentPage(pageIdx);
-                if (flipBookRef.current) {
-                  flipBookRef.current.pageFlip().turnToPage(pageIdx);
-                }
-              }}
+        {/* --- Right Panel --- */}
+        <div className="panel-right">
+          
+          <motion.div 
+            key={dummyKey}
+            className="notebook-dummy"
+            drag
+            dragConstraints={{ top: -800, bottom: 800, left: -800, right: 800 }}
+            dragElastic={0.2}
+            dragMomentum={false}
+            whileDrag={{ scale: 1.02 }}
+            style={{ 
+              cursor: 'grab',
+              zIndex: hasBeenGrabbed ? 10 : 2 
+            }}
+            onPointerDown={() => setHasBeenGrabbed(true)}
+            onDragEnd={(e, info) => {
+              // Just a basic drag end, no auto-extract
+            }}
+          >
+            <div className="spiral"></div>
+            <span>08-08</span>
+            <button 
+              onPointerDown={(e) => e.stopPropagation()} // Prevent drag start
+              onClick={() => setIsNotebookExtracted(true)}
               style={{
-                flex: 1,
+                position: 'absolute',
+                top: '15px',
+                right: '15px',
+                background: 'rgba(255,255,255,0.2)',
+                color: 'white',
+                border: '1px solid rgba(255,255,255,0.4)',
+                borderRadius: '50%',
+                width: '40px',
+                height: '40px',
                 cursor: 'pointer',
-                accentColor: '#000',
-                height: '8px',
-                borderRadius: '4px',
-                background: '#e0e0e0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '20px',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
               }}
-            />
-            <span style={{ fontSize: '14px', fontWeight: '800', color: '#000' }}>{virtualPages.length}</span>
+            >
+              🔍
+            </button>
+          </motion.div>
+
+          <div className="pocket" style={{ pointerEvents: 'none' }}>
+            <div className="pocket-curve"></div>
           </div>
         </div>
-      )}
+      </div>
+    </div>
+
+      {/* --- Overlay Modal for ID Card --- */}
+      <AnimatePresence>
+        {isIdCardExpanded && (
+          <motion.div 
+            className="lightbox-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsIdCardExpanded(false)}
+          >
+            <motion.div
+              className="id-card-wrapper lightbox-id-card"
+              layoutId="id-card"
+              onClick={(e) => e.stopPropagation()} // Prevent clicking card from closing
+              style={{
+                width: expW,
+                height: expH,
+                position: 'relative',
+                top: 'auto',
+                left: 'auto',
+                x: 0,
+                y: 0
+              }}
+            >
+              <FlippableIdCard isExpanded={true} cardWidth={expW} cardHeight={expH} />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* --- Extracted Notebook (Flipbook) --- */}
+      <AnimatePresence>
+        {isNotebookExtracted && (
+          <motion.div
+            className="extracted-notebook-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => {
+              setIsNotebookExtracted(false);
+              setHasBeenGrabbed(false);
+              setDummyKey(k => k + 1); // Reset dummy position
+            }}
+          >
+            <motion.div
+              className="extracted-notebook-content"
+              initial={{ scale: 0.9, y: 100 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 100 }}
+              transition={{ type: "spring", damping: 20, stiffness: 100 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+            {error ? (
+              <div style={{ padding: 40, textAlign: 'center', color: 'red', background: 'white' }}>
+                Error loading PDF: {error.message}
+              </div>
+            ) : (
+              <Document
+                file={pdfUrl}
+                onLoadSuccess={handleLoadSuccess}
+                onLoadError={setError}
+                loading={<div style={{ padding: 40, fontSize: 18, color: '#fff' }}>Loading Interactive PDF…</div>}
+              >
+                {virtualPages && bookSize && (
+                  <motion.div
+                    onClick={(e) => e.stopPropagation()}
+                    animate={{
+                      scale: isCurrentPageSpread ? 0.8 : 1,
+                      x: currentPage === 0
+                        ? -(bookSize.width / 2)
+                        : currentPage === virtualPages.length - 1
+                        ? (bookSize.width / 2)
+                        : 0
+                    }}
+                    transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                    style={{
+                      filter: 'drop-shadow(0 25px 30px rgba(0, 0, 0, 0.4))',
+                    }}
+                  >
+                    <HTMLFlipBook
+                      width={bookSize.width}
+                      height={bookSize.height}
+                      showCover={true}
+                      usePortrait={false}
+                      ref={flipBookRef}
+                      onFlip={(e) => setCurrentPage(e.data)}
+                    >
+                      {virtualPages.map((vp, i) =>
+                        vp.type === 'portrait' ? (
+                          <PortraitPage
+                            key={`p-${i}`}
+                            pageNumber={vp.pdfPage}
+                            width={bookSize.width}
+                            height={bookSize.height}
+                            origWidth={vp.origWidth}
+                            origHeight={vp.origHeight}
+                          />
+                        ) : (
+                          <SpreadHalfPage
+                            key={`p-${i}`}
+                            pageNumber={vp.pdfPage}
+                            width={bookSize.width}
+                            half={vp.type === 'spread-left' ? 'left' : 'right'}
+                          />
+                        )
+                      )}
+                    </HTMLFlipBook>
+                  </motion.div>
+                )}
+
+                {virtualPages && (
+                  <div className="slider-center-wrapper" onClick={(e) => e.stopPropagation()}>
+                    <div className="slider-card-container">
+                      <div className="custom-slider-wrapper">
+                      <input 
+                        type="range" 
+                        className="custom-range-input"
+                        min="0" 
+                        max={virtualPages.length - 1} 
+                        value={currentPage} 
+                        onChange={(e) => {
+                          const newPage = parseInt(e.target.value);
+                          if(flipBookRef.current && flipBookRef.current.pageFlip()) {
+                            flipBookRef.current.pageFlip().turnToPage(newPage);
+                          }
+                        }} 
+                      />
+                      <div className="slider-ticks">
+                        <div className="tick" style={{ left: '0%' }}>
+                          <div className="tick-mark"></div>
+                          <span className="tick-label">1</span>
+                        </div>
+                        <div className="tick" style={{ left: '50%' }}>
+                          <div className="tick-mark"></div>
+                          <span className="tick-label">{Math.floor(virtualPages.length / 2)}</span>
+                        </div>
+                        <div className="tick" style={{ left: '100%' }}>
+                          <div className="tick-mark"></div>
+                          <span className="tick-label">{virtualPages.length}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="slider-input-box">
+                      <input 
+                        type="number" 
+                        min="1" 
+                        max={virtualPages.length} 
+                        value={currentPage + 1} 
+                        onChange={(e) => {
+                          let val = parseInt(e.target.value);
+                          if (isNaN(val)) return;
+                          val = Math.max(1, Math.min(virtualPages.length, val));
+                          if(flipBookRef.current && flipBookRef.current.pageFlip()) {
+                            flipBookRef.current.pageFlip().turnToPage(val - 1);
+                          }
+                        }}
+                      />
+                    </div>
+                    </div>
+                  </div>
+                )}
+              </Document>
+            )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
