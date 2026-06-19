@@ -98,6 +98,7 @@ const FlippableIdCard = ({ isExpanded, cardWidth, cardHeight }) => {
 
 export default function App() {
   const flipBookRef = useRef(null);
+  const rightPanelRef = useRef(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [virtualPages, setVirtualPages] = useState(null);
   const [bookSize, setBookSize] = useState(null);
@@ -108,6 +109,7 @@ export default function App() {
   const [dummyKey, setDummyKey] = useState(0);
   const [hasBeenGrabbed, setHasBeenGrabbed] = useState(false);
   const [windowSize, setWindowSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+  const isMobileView = windowSize.w <= 768;
 
   useEffect(() => {
     const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
@@ -116,7 +118,7 @@ export default function App() {
   }, []);
 
   // Responsive dimensions for expanded ID Card
-  let expH = Math.min(840, windowSize.h * 0.9);
+  let expH = Math.min(isMobileView ? 600 : 840, windowSize.h * 0.85);
   let expW = expH / 1.4;
   if (expW > windowSize.w * 0.9) {
     expW = windowSize.w * 0.9;
@@ -124,15 +126,18 @@ export default function App() {
   }
 
   // Responsive dimensions for unexpanded ID Card
-  const folderMaxH = Math.min(700, windowSize.h * 0.9);
-  const folderMaxW = Math.min(1000, windowSize.w * 0.9);
-  const panelWidth = folderMaxW / 2;
+  const folderMaxH = isMobileView
+    ? Math.min(windowSize.h * 0.85, windowSize.h - 40)
+    : Math.min(700, windowSize.h * 0.9);
+  const folderMaxW = Math.min(1000, windowSize.w * 0.95);
+  const panelWidth = isMobileView ? folderMaxW : folderMaxW / 2;
   
-  let unexpH = Math.min(616, folderMaxH * 0.8); // 80% of folder height max
-  let unexpW = unexpH / 1.4;
-  if (unexpW > panelWidth * 0.85) {
-    unexpW = panelWidth * 0.85;
-    unexpH = unexpW * 1.4;
+  let unexpW = isMobileView ? panelWidth * 0.9 : panelWidth * 0.85;
+  let unexpH = unexpW * 1.414; // standard A4/A5 ratio
+  
+  if (unexpH > folderMaxH * 0.85) {
+    unexpH = folderMaxH * 0.85;
+    unexpW = unexpH / 1.414;
   }
 
   const pdfUrl = '/assets/porto.pdf';
@@ -160,10 +165,13 @@ export default function App() {
         }
       }
 
-      const paddingX = 100;
-      const paddingY = 150; // Reserve space for the slider
+      const isMobile = window.innerWidth <= 768;
+      const paddingX = isMobile ? 24 : 100;
+      const paddingY = isMobile ? 120 : 150;
 
-      let targetWidth = Math.min((window.innerWidth - paddingX) / 2, 650);
+      let targetWidth = isMobile
+        ? window.innerWidth - paddingX
+        : Math.min((window.innerWidth - paddingX) / 2, 650);
       let targetHeight = 550;
 
       if (spreadDims) {
@@ -221,13 +229,13 @@ export default function App() {
         </div>
 
         {/* --- Right Panel --- */}
-        <div className="panel-right">
+        <div className="panel-right" ref={rightPanelRef}>
           
           <motion.div 
             key={dummyKey}
             className="notebook-dummy"
             drag
-            dragConstraints={{ top: -800, bottom: 800, left: -800, right: 800 }}
+            dragConstraints={rightPanelRef}
             dragElastic={0.2}
             dragMomentum={false}
             whileDrag={{ scale: 1.02 }}
@@ -253,8 +261,8 @@ export default function App() {
                 color: 'white',
                 border: '1px solid rgba(255,255,255,0.4)',
                 borderRadius: '50%',
-                width: '40px',
-                height: '40px',
+                width: isMobileView ? '48px' : '40px',
+                height: isMobileView ? '48px' : '40px',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
@@ -342,8 +350,10 @@ export default function App() {
                   <motion.div
                     onClick={(e) => e.stopPropagation()}
                     animate={{
-                      scale: isCurrentPageSpread ? 0.8 : 1,
-                      x: currentPage === 0
+                      scale: isCurrentPageSpread && !isMobileView ? 0.8 : 1,
+                      x: isMobileView
+                        ? 0
+                        : currentPage === 0
                         ? -(bookSize.width / 2)
                         : currentPage === virtualPages.length - 1
                         ? (bookSize.width / 2)
@@ -358,7 +368,7 @@ export default function App() {
                       width={bookSize.width}
                       height={bookSize.height}
                       showCover={true}
-                      usePortrait={false}
+                      usePortrait={isMobileView}
                       ref={flipBookRef}
                       onFlip={(e) => setCurrentPage(e.data)}
                     >

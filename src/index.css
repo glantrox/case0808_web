@@ -113,3 +113,24 @@ code {
 .stf__wrapper, .stf__block {
   background-color: transparent !important;
 }
+
+/* Mobile touch and scroll optimizations */
+body {
+  -webkit-overflow-scrolling: touch;
+  overflow-x: hidden;
+}
+
+#root {
+  overflow-x: hidden;
+}
+
+/* Prevent 300ms tap delay on interactive elements */
+button, input, a, [role="button"] {
+  touch-action: manipulation;
+}
+
+/* Prevent text selection during drag interactions */
+.notebook-dummy, .id-card-wrapper {
+  -webkit-user-select: none;
+  user-select: none;
+}
